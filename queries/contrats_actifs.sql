@@ -1,12 +1,12 @@
--- Nombre de contrats actifs par stagiaire — appelée par l'assistant
+-- Contrats actifs par client — appelée par l'assistant
 -- pour répondre à « avec qui avons-nous des contrats actifs ? ».
 
 SELECT
-    s.prenom,
-    s.nom,
-    COUNT(c.id) AS nb_contrats_actifs
+    cl.raison_sociale,
+    COUNT(c.id) AS nb_contrats_actifs,
+    SUM(c.montant_ht) AS montant_total_ht
 FROM contrats c
-JOIN stagiaires s ON c.stagiaire_id = s.id
+JOIN clients cl ON cl.id = c.client_id
 WHERE c.statut = 'actif'
-GROUP BY s.prenom, s.nom
+GROUP BY cl.raison_sociale
 ORDER BY nb_contrats_actifs DESC;

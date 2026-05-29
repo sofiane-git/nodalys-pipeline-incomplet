@@ -25,6 +25,18 @@ from collect._common import (
 )
 
 
+class StagiairePayload(BaseModel):
+    """Schéma d'un stagiaire — allow-list explicite, telephone_personnel exclu (RGPD)."""
+
+    model_config = {"extra": "ignore"}
+
+    id: int
+    session_id: int
+    prenom: str
+    nom: str
+    email: str
+
+
 class SessionPayload(BaseModel):
     """Schéma d'une session telle que la renvoie l'API Nodalys."""
 
@@ -101,35 +113,50 @@ def upsert_sessions(session, sessions_payload: list[SessionPayload]) -> int:
     return inserted
 
 
-def upsert_stagiaires(session) -> int:
-    """Collecte des stagiaires depuis ``GET /api/stagiaires`` et upsert."""
+def upsert_stagiaires(session, sessions_payload: list[SessionPayload]) -> int:
+    """Collecte des stagiaires (pagination cursor) et upsert idempotent.
+
+    L'email n'est stocké que si la session du stagiaire est encore active
+    (date_fin >= aujourd'hui) — exigence RGPD (sur-collecte).
+    """
     base = get_api_base_url()
-    # TODO: l'endpoint stagiaires renvoie maintenant du paginé, à passer
-    # en boucle sur next_cursor un de ces jours.
-    payload = http_get_json(f"{base}/api/stagiaires")
+    active_session_ids = {
+        s.id for s in sessions_payload if s.date_fin >= date.today()
+    }
+
+    cursor: str | None = None
     inserted = 0
-    for item in payload["items"]:
-        result = session.execute(
-            text(
-                """
-                INSERT INTO stagiaires (id, session_id, prenom, nom, email)
-                VALUES (:id, :session_id, :prenom, :nom, :email)
-                ON CONFLICT (id) DO UPDATE
-                  SET session_id = EXCLUDED.session_id,
-                      prenom = EXCLUDED.prenom,
-                      nom = EXCLUDED.nom,
-                      email = EXCLUDED.email
-                """
-            ),
-            {
-                "id": item["id"],
-                "session_id": item["session_id"],
-                "prenom": item["prenom"],
-                "nom": item["nom"],
-                "email": item["email"],
-            },
-        )
-        inserted += result.rowcount or 0
+    while True:
+        params = {"cursor": cursor} if cursor else {}
+        payload = http_get_json(f"{base}/api/stagiaires", params=params)
+        for item in payload["items"]:
+            stagiaire = StagiairePayload.model_validate(item)
+            email = stagiaire.email if stagiaire.session_id in active_session_ids else None
+            result = session.execute(
+                text(
+                    """
+                    INSERT INTO stagiaires (id, session_id, prenom, nom, email)
+                    VALUES (:id, :session_id, :prenom, :nom, :email)
+                    ON CONFLICT (id) DO UPDATE
+                      SET session_id = EXCLUDED.session_id,
+                          prenom = EXCLUDED.prenom,
+                          nom = EXCLUDED.nom,
+                          email = EXCLUDED.email
+                    """
+                ),
+                {
+                    "id": stagiaire.id,
+                    "session_id": stagiaire.session_id,
+                    "prenom": stagiaire.prenom,
+                    "nom": stagiaire.nom,
+                    "email": email,
+                },
+            )
+            inserted += result.rowcount or 0
+        cursor = payload.get("next_cursor")
+        if not cursor:
+            break
+
     log.info("collect.stagiaires.upserted", count=inserted)
     return inserted
 
@@ -140,7 +167,7 @@ def run() -> None:
     with db_session() as session:
         nb_clients = upsert_clients(session, sessions_payload)
         nb_sessions = upsert_sessions(session, sessions_payload)
-        nb_stagiaires = upsert_stagiaires(session)
+        nb_stagiaires = upsert_stagiaires(session, sessions_payload)
     log.info(
         "collect.sessions.done",
         clients=nb_clients,

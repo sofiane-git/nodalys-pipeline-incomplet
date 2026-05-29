@@ -5,8 +5,9 @@ SELECT
     f.stagiaire_email,
     f.note_globale,
     f.commentaire,
+    f.date_saisie,
     f.created_at
 FROM feedbacks f
-WHERE f.created_at > NOW() - '7 days'
+WHERE f.created_at > NOW() - INTERVAL '7 days'
 ORDER BY f.created_at DESC
 LIMIT 50;
