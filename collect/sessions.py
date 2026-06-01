@@ -12,6 +12,7 @@ Lancement :
 
 from __future__ import annotations
 
+import time
 from datetime import date
 
 from pydantic import BaseModel, Field
@@ -156,6 +157,7 @@ def upsert_stagiaires(session, sessions_payload: list[SessionPayload]) -> int:
         cursor = payload.get("next_cursor")
         if not cursor:
             break
+        time.sleep(0.5)
 
     log.info("collect.stagiaires.upserted", count=inserted)
     return inserted

@@ -13,6 +13,7 @@ Toutes les fonctions ci-dessous sont réutilisables — voir
 from __future__ import annotations
 
 import os
+import time
 from contextlib import contextmanager
 from typing import Iterator
 
@@ -69,10 +70,14 @@ def db_session() -> Iterator[Session]:
         session.close()
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=8))
+@retry(stop=stop_after_attempt(5), wait=wait_exponential(min=1, max=30))
 def http_get_json(url: str, **kwargs) -> dict:
     """GET + retry exponentiel — convention partagée par tous les collecteurs API."""
     with httpx.Client(timeout=10.0) as client:
         response = client.get(url, **kwargs)
+        if response.status_code == 429:
+            # Respect Retry-After header if present, otherwise wait 10s
+            wait = int(response.headers.get("Retry-After", 10))
+            time.sleep(wait)
         response.raise_for_status()
         return response.json()
